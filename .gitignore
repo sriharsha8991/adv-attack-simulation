@@ -1,0 +1,40 @@
+# --- Secrets & Environment ---
+.env
+.env.local
+secrets/
+
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+venv/
+env/
+
+# --- Jupyter & Notebooks ---
+*.ipynb
+.ipynb_checkpoints/
+
+# --- Generated Output ---
+output/
+*.json.bak
+
+# --- IDE & Editor ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- Data Cache (large files) ---
+# src/data/mitre/enterprise-attack.json  # Uncomment if Git LFS available
+# src/data/misp_galaxies/*.json          # Uncomment if Git LFS available
