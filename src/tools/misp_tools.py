@@ -173,75 +173,7 @@ class MISPTools:
         )
         return context
 
-    # ──────────────────────────────────────────────────────────
-    # Tool definitions for LLM function calling
-    # ──────────────────────────────────────────────────────────
 
-    @staticmethod
-    def tool_definitions() -> list[dict[str, Any]]:
-        """Return function tool definitions for MISP tools."""
-        return [
-            {
-                "name": "search_misp_galaxy",
-                "description": (
-                    "Search MISP Galaxy data for threat intelligence on a "
-                    "specific ATT&CK technique. Returns known APT groups, "
-                    "tools, and malware from community intelligence."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "technique_id": {
-                            "type": "string",
-                            "description": "ATT&CK technique ID (e.g. 'T1003')",
-                        }
-                    },
-                    "required": ["technique_id"],
-                },
-            },
-            {
-                "name": "enrich_technique_context",
-                "description": (
-                    "Build complete threat intelligence context for a technique "
-                    "by combining Neo4j knowledge graph and MISP Galaxy data. "
-                    "Returns a ThreatIntelContext with groups, tools, structured "
-                    "campaign data (with dates and attribution), and detection guidance."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "technique_id": {
-                            "type": "string",
-                            "description": "ATT&CK technique ID (e.g. 'T1003')",
-                        }
-                    },
-                    "required": ["technique_id"],
-                },
-            },
-        ]
-
-    def dispatch_tool_call(
-        self, tool_name: str, arguments: dict[str, Any]
-    ) -> Any:
-        """Dispatch an LLM function tool call.
-
-        Args:
-            tool_name: Tool function name.
-            arguments: Tool arguments dict.
-
-        Returns:
-            Tool result. ThreatIntelContext is returned as dict for JSON serialization.
-
-        Raises:
-            ValueError: If tool_name not recognized.
-        """
-        if tool_name == "search_misp_galaxy":
-            return self.search_misp_galaxy(**arguments)
-        elif tool_name == "enrich_technique_context":
-            ctx = self.enrich_technique_context(**arguments)
-            return ctx.model_dump()
-        else:
-            raise ValueError(f"Unknown MISP tool: {tool_name}")
 
 
 # ──────────────────────────────────────────────────────────────

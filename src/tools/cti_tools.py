@@ -283,107 +283,132 @@ class CTITools:
         return results
 
     # ──────────────────────────────────────────────────────────
+    # Omnibus enrichment tool
+    # ──────────────────────────────────────────────────────────
+
+    def get_technique_intel(
+        self, technique_id: str
+    ) -> dict[str, Any]:
+        """Get comprehensive, detailed intelligence for a technique in one call.
+
+        This is the **omnibus enrichment tool** — the single entry point for
+        all technique-level threat intelligence.  It replaces the need for
+        separate calls to ``get_intrusion_sets_for_technique``,
+        ``get_tools_for_technique``, ``get_detection_guidance``,
+        ``get_mitigations``, and ``get_campaigns_for_technique``.
+
+        Internally it executes 5 targeted Cypher queries and merges the
+        results into one rich dictionary:
+
+        * ``FULL_TECHNIQUE_CONTEXT`` — technique metadata + summary names
+        * ``INTRUSION_SETS_FOR_TECHNIQUE`` — groups with aliases and usage
+        * ``TOOLS_FOR_TECHNIQUE`` — tools/malware with type and usage
+        * ``MITIGATIONS_FOR_TECHNIQUE`` — mitigations with descriptions
+        * ``CAMPAIGNS_FOR_TECHNIQUE`` — campaigns with dates + attribution
+
+        Detection guidance (``detection_text``, ``data_sources``) is
+        already fully captured in ``FULL_TECHNIQUE_CONTEXT`` so no extra
+        query is needed.
+
+        Args:
+            technique_id: ATT&CK technique or sub-technique ID
+                (e.g. 'T1003', 'T1003.001').
+
+        Returns:
+            Dict with keys:
+
+            * **name**, **attack_id**, **description**, **platforms**,
+              **tactics** — technique metadata
+            * **groups** — ``list[dict]`` with ``group_name``, ``aliases``,
+              ``usage_description``
+            * **tools** — ``list[dict]`` with ``name``, ``type``,
+              ``description``, ``usage_description``
+            * **detection** — ``dict`` with ``detection_text``,
+              ``data_sources``
+            * **mitigations** — ``list[dict]`` with ``mitigation_name``,
+              ``description``, ``how_it_mitigates``
+            * **campaigns** — ``list[dict]`` with ``campaign_name``,
+              ``external_id``, ``description``, ``first_seen``,
+              ``last_seen``, ``attributed_groups``
+
+            Returns ``{"error": "..."}`` if the technique is not found.
+        """
+        # 1. Base metadata + summary names
+        base = self.get_full_technique_context(technique_id)
+        if not base:
+            logger.warning("Technique %s not found in graph.", technique_id)
+            return {"error": f"Technique {technique_id} not found in knowledge graph"}
+
+        # 2. Detailed records (richer than the summary names above)
+        groups = self.get_intrusion_sets_for_technique(technique_id)
+        tools = self.get_tools_for_technique(technique_id)
+        mitigations = self.get_mitigations(technique_id)
+        campaigns = self.get_campaigns_for_technique(technique_id)
+
+        result = {
+            # Technique metadata
+            "name": base.get("name", ""),
+            "attack_id": base.get("attack_id", ""),
+            "description": base.get("description", ""),
+            "platforms": base.get("platforms", []),
+            "tactics": base.get("tactics", []),
+            # Detailed enrichment
+            "groups": groups,
+            "tools": tools,
+            "detection": {
+                "detection_text": base.get("detection_text") or "",
+                "data_sources": base.get("data_sources", []),
+            },
+            "mitigations": mitigations,
+            "campaigns": campaigns,
+        }
+
+        logger.info(
+            "Technique intel for %s: %d groups, %d tools, %d mitigations, "
+            "%d campaigns.",
+            technique_id,
+            len(groups),
+            len(tools),
+            len(mitigations),
+            len(campaigns),
+        )
+        return result
+
+    # ──────────────────────────────────────────────────────────
     # Tool definitions for LLM function calling
     # ──────────────────────────────────────────────────────────
 
     @staticmethod
     def tool_definitions() -> list[dict[str, Any]]:
-        """Return function tool definitions for LLM registration.
+        """Return the **consolidated 4-tool set** for LLM registration.
 
-        These follow the OpenAI/Gemini function calling schema.
-        Can be passed directly to the LLM client's tools parameter.
+        Design rationale (Feb 24 2026 optimisation):
+
+        The original 9 + 2 tool surface was reduced to 4 tools after
+        analysis showed 6 technique-keyed tools were subsumed by
+        ``get_technique_intel`` (the omnibus enrichment query).  Exposing
+        all of them caused LLM "choice paralysis" and wasted ~450 tokens
+        per prompt on redundant tool definitions.
+
+        The 4-tool set maps to the natural reasoning flow::
+
+            Discover  → get_techniques_by_tactic / get_techniques_for_platform
+            Navigate  → get_subtechniques
+            Enrich    → get_technique_intel (ONE call, full detail)
+
+        Individual methods (``get_intrusion_sets_for_technique``, etc.)
+        remain available for programmatic / script use but are **not**
+        registered with the LLM.
         """
         return [
             {
-                "name": "get_intrusion_sets_for_technique",
-                "description": (
-                    "Get APT groups and intrusion sets known to use a specific "
-                    "ATT&CK technique. Returns group names, aliases, and usage context."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "technique_id": {
-                            "type": "string",
-                            "description": "ATT&CK technique ID (e.g. 'T1003', 'T1003.001')",
-                        }
-                    },
-                    "required": ["technique_id"],
-                },
-            },
-            {
-                "name": "get_tools_for_technique",
-                "description": (
-                    "Get tools and malware associated with a specific ATT&CK technique. "
-                    "Returns tool names, types, and usage descriptions."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "technique_id": {
-                            "type": "string",
-                            "description": "ATT&CK technique ID (e.g. 'T1003')",
-                        }
-                    },
-                    "required": ["technique_id"],
-                },
-            },
-            {
-                "name": "get_detection_guidance",
-                "description": (
-                    "Get detection guidance and data sources for a specific "
-                    "ATT&CK technique. Helps build defensive context."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "technique_id": {
-                            "type": "string",
-                            "description": "ATT&CK technique ID (e.g. 'T1003')",
-                        }
-                    },
-                    "required": ["technique_id"],
-                },
-            },
-            {
-                "name": "get_mitigations",
-                "description": (
-                    "Get mitigations for a specific ATT&CK technique. "
-                    "Returns mitigation names and how they reduce risk."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "technique_id": {
-                            "type": "string",
-                            "description": "ATT&CK technique ID (e.g. 'T1003')",
-                        }
-                    },
-                    "required": ["technique_id"],
-                },
-            },
-            {
-                "name": "get_subtechniques",
-                "description": (
-                    "Get sub-techniques for a parent ATT&CK technique. "
-                    "Returns sub-technique names, IDs, and descriptions."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "technique_id": {
-                            "type": "string",
-                            "description": "Parent technique ID (e.g. 'T1003')",
-                        }
-                    },
-                    "required": ["technique_id"],
-                },
-            },
-            {
                 "name": "get_techniques_by_tactic",
                 "description": (
-                    "Get all techniques belonging to a specific ATT&CK tactic. "
-                    "Use tactic shortnames like 'credential-access', 'lateral-movement'."
+                    "Get all ATT&CK techniques belonging to a specific tactic. "
+                    "Use tactic shortnames: 'credential-access', 'lateral-movement', "
+                    "'persistence', 'defense-evasion', 'privilege-escalation', "
+                    "'discovery', 'collection', 'exfiltration', 'command-and-control', "
+                    "'initial-access', 'execution', 'resource-development', 'impact'."
                 ),
                 "parameters": {
                     "type": "object",
@@ -400,56 +425,71 @@ class CTITools:
                 },
             },
             {
-                "name": "get_full_technique_context",
+                "name": "get_techniques_for_platform",
                 "description": (
-                    "Get comprehensive threat intelligence context for a technique "
-                    "in a single call: groups, tools, data sources, mitigations, "
-                    "campaigns, detection guidance. Best for building a complete picture."
+                    "Get ATT&CK techniques filtered by tactic AND platform. "
+                    "Useful when generating abilities for a specific OS. "
+                    "Platform names are capitalised: 'Windows', 'Linux', 'macOS'."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "tactic": {
+                            "type": "string",
+                            "description": "ATT&CK tactic shortname",
+                        },
+                        "platform": {
+                            "type": "string",
+                            "description": (
+                                "Platform name (e.g. 'Windows', 'Linux', 'macOS')"
+                            ),
+                        },
+                    },
+                    "required": ["tactic", "platform"],
+                },
+            },
+            {
+                "name": "get_subtechniques",
+                "description": (
+                    "Get sub-techniques for a parent ATT&CK technique. "
+                    "Use to discover specific variants (e.g. T1003 → "
+                    "T1003.001 LSASS Memory, T1003.002 SAM, etc.)."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "technique_id": {
                             "type": "string",
-                            "description": "ATT&CK technique ID (e.g. 'T1003')",
+                            "description": "Parent technique ID (e.g. 'T1003')",
                         }
                     },
                     "required": ["technique_id"],
                 },
             },
             {
-                "name": "get_campaigns_for_technique",
+                "name": "get_technique_intel",
                 "description": (
-                    "Get real-world campaigns and operations that used a specific "
-                    "ATT&CK technique. Returns campaign names, date ranges, "
-                    "and attributed APT groups. Essential for temporal threat context."
+                    "Get comprehensive intelligence for a specific technique in "
+                    "ONE call. Returns: technique metadata (name, description, "
+                    "platforms, tactics), APT groups with aliases and usage "
+                    "details, tools/malware with descriptions, detection guidance "
+                    "with data sources, mitigations with descriptions, and "
+                    "real-world campaigns with date ranges and group attribution. "
+                    "This is the primary enrichment tool — use it once per "
+                    "technique instead of making multiple separate queries."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "technique_id": {
                             "type": "string",
-                            "description": "ATT&CK technique ID (e.g. 'T1003', 'T1003.001')",
+                            "description": (
+                                "ATT&CK technique or sub-technique ID "
+                                "(e.g. 'T1003', 'T1003.001')"
+                            ),
                         }
                     },
                     "required": ["technique_id"],
-                },
-            },
-            {
-                "name": "get_campaigns_for_group",
-                "description": (
-                    "Get campaigns attributed to a specific APT group / intrusion set. "
-                    "Useful for understanding the operational history of a threat actor."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "group_name": {
-                            "type": "string",
-                            "description": "Intrusion set name (e.g. 'APT29', 'Lazarus Group')",
-                        }
-                    },
-                    "required": ["group_name"],
                 },
             },
         ]
@@ -458,6 +498,8 @@ class CTITools:
         self, tool_name: str, arguments: dict[str, Any]
     ) -> Any:
         """Dispatch an LLM function tool call to the correct method.
+
+        Maps only the 4 LLM-registered tools from ``tool_definitions()``.
 
         Args:
             tool_name: Name of the tool to call.
@@ -469,16 +511,11 @@ class CTITools:
         Raises:
             ValueError: If tool_name is not recognized.
         """
-        dispatch_map = {
-            "get_intrusion_sets_for_technique": self.get_intrusion_sets_for_technique,
-            "get_tools_for_technique": self.get_tools_for_technique,
-            "get_detection_guidance": self.get_detection_guidance,
-            "get_mitigations": self.get_mitigations,
-            "get_subtechniques": self.get_subtechniques,
+        dispatch_map: dict[str, Any] = {
             "get_techniques_by_tactic": self.get_techniques_by_tactic,
-            "get_full_technique_context": self.get_full_technique_context,
-            "get_campaigns_for_technique": self.get_campaigns_for_technique,
-            "get_campaigns_for_group": self.get_campaigns_for_group,
+            "get_techniques_for_platform": self.get_techniques_for_platform,
+            "get_subtechniques": self.get_subtechniques,
+            "get_technique_intel": self.get_technique_intel,
         }
 
         func = dispatch_map.get(tool_name)

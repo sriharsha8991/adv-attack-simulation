@@ -90,7 +90,8 @@ MERGE (d:DataSource {stix_id: item.stix_id})
 SET d.name = item.name,
     d.description = item.description
 """
-
+#Mitigation is a defensive control category. they are like preventive measures but they are designed to detect and respond to attacks that have already occurred. They can include things like intrusion detection systems, security information and event management (SIEM) systems, and incident response teams. 
+# #Detective controls are important for identifying and mitigating attacks that have bypassed preventive controls, and for minimizing the damage caused by successful attacks.
 LOAD_MITIGATIONS = """
 UNWIND $items AS item
 MERGE (mt:Mitigation {stix_id: item.stix_id})

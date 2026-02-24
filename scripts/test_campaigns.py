@@ -1,10 +1,8 @@
 """Quick test: verify campaign enrichment pipeline end-to-end."""
-import sys
-sys.path.insert(0, "src")
 
-from graph.connection import Neo4jConnection
-from tools.cti_tools import CTITools
-from tools.misp_tools import MISPTools
+from src.graph.connection import Neo4jConnection
+from src.tools.cti_tools import CTITools
+from src.tools.misp_tools import MISPTools
 
 conn = Neo4jConnection()
 cti = CTITools(conn)

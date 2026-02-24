@@ -2,6 +2,14 @@
 
 These queries are used by the agent's function tools (Phase 3+).
 Defined here as constants to keep Cypher centralized and testable.
+
+Test command to check all the nodes and relationships are present after ingestion:
+
+MATCH (n)-[r]->(m)
+RETURN n, r, m;
+
+
+
 """
 
 # ──────────────────────────────────────────────────────────────
@@ -148,17 +156,6 @@ WHERE $platform IN t.platforms AND NOT t.is_subtechnique
 RETURN t.name AS name, t.attack_id AS attack_id,
        t.description AS description
 ORDER BY t.attack_id
-"""
-
-# ──────────────────────────────────────────────────────────────
-# Query 12: Existing Abilities for Category (deduplication)
-# ──────────────────────────────────────────────────────────────
-ABILITIES_FOR_CATEGORY = """
-MATCH (a:Ability {attack_category: $attack_category})
-RETURN a.id AS id, a.name AS name,
-       a.attack_category AS attack_category,
-       a.approval_status AS status
-ORDER BY a.name
 """
 
 # ──────────────────────────────────────────────────────────────

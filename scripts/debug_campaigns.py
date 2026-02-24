@@ -1,7 +1,6 @@
 """Debug: check campaign→group attributions and technique links."""
-import sys
-sys.path.insert(0, "src")
-from graph.connection import Neo4jConnection
+
+from src.graph.connection import Neo4jConnection
 
 conn = Neo4jConnection()
 
