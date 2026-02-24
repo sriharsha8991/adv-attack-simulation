@@ -21,25 +21,9 @@ from typing import Any
 
 import httpx
 
+from src.config import DEFAULT_GALAXY_CACHE_DIR, GALAXY_BASE_URL, GALAXY_FILES
+
 logger = logging.getLogger(__name__)
-
-# ──────────────────────────────────────────────────────────────
-# Constants
-# ──────────────────────────────────────────────────────────────
-
-GALAXY_BASE_URL = (
-    "https://raw.githubusercontent.com/MISP/misp-galaxy/main/clusters"
-)
-
-# Galaxy files we need for Phase 3 enrichment
-GALAXY_FILES: dict[str, str] = {
-    "attack_pattern": "mitre-attack-pattern.json",
-    "intrusion_set": "mitre-intrusion-set.json",
-    "tool": "mitre-tool.json",
-    "malware": "mitre-malware.json",
-}
-
-DEFAULT_CACHE_DIR = Path(__file__).resolve().parent.parent / "data" / "misp_galaxies"
 
 
 # ──────────────────────────────────────────────────────────────
@@ -55,7 +39,7 @@ class GalaxyManager:
     """
 
     def __init__(self, cache_dir: str | Path | None = None) -> None:
-        self._cache_dir = Path(cache_dir) if cache_dir else DEFAULT_CACHE_DIR
+        self._cache_dir = Path(cache_dir) if cache_dir else DEFAULT_GALAXY_CACHE_DIR
         self._cache_dir.mkdir(parents=True, exist_ok=True)
 
         # Lookup indexes: technique_id → list of related items

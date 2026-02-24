@@ -113,7 +113,7 @@ class GeminiClient(LLMClient):
 
         if schema:
             config_kwargs["responseMimeType"] = "application/json"
-            config_kwargs["responseSchema"] = schema
+            config_kwargs["responseSchema"] = _strip_schema_examples(schema)
 
         config = types.GenerateContentConfig(**config_kwargs)
 
@@ -132,15 +132,14 @@ class GeminiClient(LLMClient):
         tool_call_log = _extract_tool_calls(response) if tools else []
         total_tokens = _extract_tokens(response)
 
-        # Structured output — use SDK's response.parsed, fall back
-        # to manual validation with retry on failure
+        # Structured output — parse with the original Pydantic class.
+        # We pass a cleaned dict (not the class) as responseSchema, so
+        # response.parsed won't be available; always validate manually.
         parsed = None
         if schema:
-            parsed = getattr(response, "parsed", None)
-            if parsed is None:
-                parsed = self._validate_with_retry(
-                    text, schema, contents, config
-                )
+            parsed = self._validate_with_retry(
+                text, schema, contents, config
+            )
 
         logger.info(
             "Gemini generate: tools=%s schema=%s tool_calls=%d tokens=%d",
@@ -332,3 +331,27 @@ def _extract_tokens(response: types.GenerateContentResponse) -> int:
     if usage is None:
         return 0
     return getattr(usage, "total_token_count", 0) or 0
+
+
+def _strip_schema_examples(schema: type[BaseModel]) -> dict[str, Any]:
+    """Convert a Pydantic model to a JSON schema dict with ``examples`` removed.
+
+    Gemini's ``responseSchema`` validator (``types.Schema``) rejects the
+    ``examples`` keyword that Pydantic emits from ``json_schema_extra``.
+    This helper recursively strips it so the cleaned dict can be passed
+    to ``GenerateContentConfig``.
+    """
+
+    def _strip(obj: Any) -> Any:
+        if isinstance(obj, dict):
+            return {
+                k: _strip(v)
+                for k, v in obj.items()
+                if k != "examples"
+            }
+        if isinstance(obj, list):
+            return [_strip(item) for item in obj]
+        return obj
+
+    raw_schema = schema.model_json_schema()
+    return _strip(raw_schema)

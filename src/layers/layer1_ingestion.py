@@ -22,38 +22,15 @@ from pathlib import Path
 from typing import Any
 
 import requests
-from stix2 import Filter, MemoryStore
+from stix2 import MemoryStore
 
-logger = logging.getLogger(__name__)
-
-# --- Constants ---
-
-STIX_GITHUB_URL = (
-    "https://raw.githubusercontent.com/mitre-attack/attack-stix-data/"
-    "master/enterprise-attack/enterprise-attack.json"
+from src.config import (
+    DEFAULT_STIX_CACHE_PATH,
+    STIX_FILTERS,
+    STIX_GITHUB_URL,
 )
 
-DEFAULT_CACHE_PATH = Path(__file__).parent.parent / "data" / "mitre" / "enterprise-attack.json"
-
-# STIX type → Filter mapping
-STIX_FILTERS: dict[str, list[Filter]] = {
-    "tactics": [Filter("type", "=", "x-mitre-tactic")],
-    "techniques": [
-        Filter("type", "=", "attack-pattern"),
-        Filter("x_mitre_is_subtechnique", "=", False),
-    ],
-    "subtechniques": [
-        Filter("type", "=", "attack-pattern"),
-        Filter("x_mitre_is_subtechnique", "=", True),
-    ],
-    "intrusion_sets": [Filter("type", "=", "intrusion-set")],
-    "tools": [Filter("type", "=", "tool")],
-    "malware": [Filter("type", "=", "malware")],
-    "data_sources": [Filter("type", "=", "x-mitre-data-source")],
-    "mitigations": [Filter("type", "=", "course-of-action")],
-    "campaigns": [Filter("type", "=", "campaign")],
-    "relationships": [Filter("type", "=", "relationship")],
-}
+logger = logging.getLogger(__name__)
 
 
 # ──────────────────────────────────────────────────────────────
@@ -63,7 +40,7 @@ STIX_FILTERS: dict[str, list[Filter]] = {
 
 def download_stix_bundle(
     url: str = STIX_GITHUB_URL,
-    cache_path: Path = DEFAULT_CACHE_PATH,
+    cache_path: Path = DEFAULT_STIX_CACHE_PATH,
     force: bool = False,
 ) -> Path:
     """Download the enterprise-attack STIX bundle and cache locally.

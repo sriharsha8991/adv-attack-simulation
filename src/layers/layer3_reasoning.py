@@ -35,72 +35,16 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from src.config import BLOCKLIST_VERSION, CATEGORY_TO_TACTICS, SYSTEM_PROMPT
 from src.graph.connection import Neo4jConnection
 from src.layers.layer2_enrichment import GalaxyManager
+from src.layers.layer6_safety import SafetyValidator
 from src.llm.base import GenerateResult, LLMClient
 from src.models.ability import Ability, GenerationTrace
 from src.models.enums import ApprovalStatus, AttackCategory, Platform
 from src.tools.graph_tools import create_reasoning_tools
 
 logger = logging.getLogger(__name__)
-
-# ──────────────────────────────────────────────────────────────
-# Category → Tactic mapping
-# ──────────────────────────────────────────────────────────────
-
-CATEGORY_TO_TACTICS: dict[str, list[str]] = {
-    "credential_access":          ["credential-access"],
-    "privilege_escalation":       ["privilege-escalation"],
-    "persistence":                ["persistence"],
-    "lateral_movement":           ["lateral-movement"],
-    "defense_evasion":            ["defense-evasion"],
-    "command_and_control":        ["command-and-control"],
-    "discovery":                  ["discovery"],
-    "collection":                 ["collection"],
-    "exfiltration":               ["exfiltration"],
-    "cloud_iam_abuse":            ["credential-access", "privilege-escalation"],
-    "active_directory_abuse":     ["credential-access", "lateral-movement"],
-    "web_application_simulation": ["initial-access"],
-    "network_signaling":          ["command-and-control"],
-}
-
-# ──────────────────────────────────────────────────────────────
-# System prompt — static constant
-# ──────────────────────────────────────────────────────────────
-
-SYSTEM_PROMPT = """\
-You are an adversary simulation specialist for defensive security testing.
-Your role is to generate MITRE ATT&CK-mapped attack abilities that help security teams
-evaluate their detection and response capabilities.
-
-IMPORTANT RULES:
-1. Every ability is for SIMULATION ONLY — include simulation markers in all commands
-2. Every ability must have cleanup procedures that reverse all changes
-3. Only reference real MITRE ATT&CK techniques — verify with the knowledge graph tools
-4. Include threat intelligence context — which groups use this technique, what tools they use
-5. Target detection gaps — abilities should trigger the defensive telemetry they test
-6. Abilities must be atomic and composable — single technique or small 2–3 step scenarios
-7. Avoid full campaign chains — focus on individual technique simulation
-8. Include platform-specific executors with simulation markers and cleanup
-
-You have access to 4 tools:
-1. get_techniques_by_tactic(tactic) — discover techniques in a tactic
-2. get_techniques_for_platform(tactic, platform) — discover techniques for tactic + OS
-3. get_subtechniques(technique_id) — navigate parent → sub-techniques
-4. get_technique_intel(technique_id) — comprehensive enrichment in ONE call:
-   groups (with aliases, usage), tools/malware, detection guidance, mitigations,
-   campaigns (with dates, group attribution), and MISP Galaxy community data
-
-WORKFLOW:
-1. DISCOVER: Use get_techniques_by_tactic or get_techniques_for_platform
-2. NAVIGATE: Use get_subtechniques to find specific variants
-3. ENRICH: Use get_technique_intel ONCE per technique for full context
-4. Generate detailed, realistic simulation abilities from the enriched data
-5. Include platform-specific executors with simulation markers and cleanup
-
-OUTPUT:
-Generate Ability objects conforming to the provided schema.
-Do not include conversational text. Output only structured data."""
 
 # ──────────────────────────────────────────────────────────────
 # Reasoning Engine
@@ -140,6 +84,9 @@ class ReasoningEngine:
 
         # Create tool closures
         self._tools = create_reasoning_tools(self._conn, self._galaxy)
+
+        # Safety validator (shares the graph connection for MITRE lookups)
+        self._validator = SafetyValidator(conn=self._conn)
 
         logger.info(
             "ReasoningEngine initialized: llm=%s, tools=%d",
@@ -205,6 +152,8 @@ class ReasoningEngine:
 
         # ── Phase A: Reasoning with tools ─────────────────────
         phase_a_result = self._phase_a_reasoning(cat_value, plat_value, tactics, count)
+        logger.info("Phase A reasoning finished for category=%s, platform=%s", cat_value, plat_value)
+        logger.info("Phase A result: %s", phase_a_result)
         if phase_a_result is None:
             return []
 
@@ -235,13 +184,29 @@ class ReasoningEngine:
                 # Post-generation enforcement
                 ability = self._enforce_safety_fields(ability)
 
+                # Safety validation pipeline (18 rules)
+                validation = self._validator.validate(ability)
+
+                if not validation.passed:
+                    ability.approval_status = ApprovalStatus.BLOCKED
+                    logger.warning(
+                        "Ability %d/%d BLOCKED by safety rules: %s",
+                        i,
+                        count,
+                        [f.rule_name for f in validation.hard_failures],
+                    )
+
+                # Collect soft warnings for human reviewers
+                warning_msgs = [w.detail for w in validation.warnings]
+
                 # Attach generation trace
                 ability.generation_trace = GenerationTrace(
                     model=self._llm.model_name,
                     tools_called=[tc["name"] for tc in tool_call_log],
                     reasoning_steps=len(tool_call_log),
                     total_tokens=phase_a_tokens + total_phase_b_tokens,
-                    blocklist_version="1.0.0",
+                    blocklist_version=BLOCKLIST_VERSION,
+                    validation_warnings=warning_msgs,
                 )
 
                 abilities.append(ability)
@@ -440,11 +405,14 @@ def _build_composition_prompt(
         f"3. **threat_intel_context** must include groups, tools, campaigns from the "
         f"enrichment data — do NOT fabricate intelligence\n"
         f"4. **executors** must include at least one {platform}-specific executor with:\n"
-        f"   - A simulation marker comment (e.g., `# SIMULATION ONLY — T1003.001`)\n"
-        f"   - Realistic but safe simulation commands\n"
-        f"   - A cleanup_procedure that reverses all changes\n"
-        f"5. **simulation_only** must be `true`\n"
-        f"6. **approval_status** must be `PENDING`\n"
-        f"7. **created_by** must be `AI`\n\n"
+        f"   - A complete, syntactically valid, directly executable command\n"
+        f"   - Real OS binary names, correct flags, proper escaping, real filesystem paths\n"
+        f"   - Do NOT insert inline comments inside command or cleanup_procedure strings\n"
+        f"   - Do NOT use placeholder values like `<target>` or `$VICTIM_IP`\n"
+        f"   - A cleanup_procedure that reverses all changes (also directly executable)\n"
+        f"5. **payload_description** must contain all explanatory/contextual text\n"
+        f"6. **simulation_only** must be `true`\n"
+        f"7. **approval_status** must be `PENDING`\n"
+        f"8. **created_by** must be `AI`\n\n"
         f"Return a single Ability JSON object."
     )
