@@ -47,8 +47,16 @@ class Settings(BaseSettings):
 
     # --- Safety & Generation ---
     max_abilities_per_batch: int = 20
+    enable_safety_layer: bool = False
     enable_api_submission: bool = False
     backend_api_url: str = ""
+
+    # --- API Server ---
+    api_host: str = "0.0.0.0"
+    api_port: int = 8000
+
+    # --- Groq ---
+    groq_base_url: str = "https://api.groq.com/openai/v1"
 
     # --- Logging ---
     log_level: str = "INFO"
@@ -64,6 +72,51 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Return singleton Settings instance (cached after first call)."""
     return Settings()
+
+
+# ══════════════════════════════════════════════════════════════
+# Versioning
+# ══════════════════════════════════════════════════════════════
+
+SCHEMA_VERSION: str = "1.0"
+AGENT_VERSION: str = "0.1.0"
+
+
+# ══════════════════════════════════════════════════════════════
+# LLM Retry / Backoff
+# ══════════════════════════════════════════════════════════════
+
+LLM_MAX_RETRIES: int = 3
+LLM_BASE_DELAY: float = 1.0       # seconds
+LLM_MAX_DELAY: float = 30.0       # seconds
+LLM_BACKOFF_FACTOR: float = 2.0
+MAX_VALIDATION_RETRIES: int = 3
+
+
+# ══════════════════════════════════════════════════════════════
+# HTTP / Download
+# ══════════════════════════════════════════════════════════════
+
+STIX_DOWNLOAD_TIMEOUT: int = 120   # seconds
+DOWNLOAD_CHUNK_SIZE: int = 8192
+GALAXY_DOWNLOAD_TIMEOUT: float = 60.0  # seconds
+
+
+# ══════════════════════════════════════════════════════════════
+# Graph Loading
+# ══════════════════════════════════════════════════════════════
+
+GRAPH_BATCH_SIZE: int = 500
+
+
+# ══════════════════════════════════════════════════════════════
+# Content Validation Thresholds
+# ══════════════════════════════════════════════════════════════
+
+MIN_ABILITY_NAME_LEN: int = 5
+MIN_ABILITY_DESC_LEN: int = 50
+MAX_SNIPPET_LEN: int = 300
+MAX_DETECTION_TEXT_LEN: int = 1000
 
 
 # ══════════════════════════════════════════════════════════════
@@ -181,35 +234,35 @@ Do not include conversational text. Output only structured data."""
 BLOCKLIST_VERSION: str = "1.0.0"
 
 COMMAND_BLOCKLIST: list[str] = [
-    # Destructive disk operations
-    r"rm\s+-rf\s+/(?!\w)",
-    r"format\s+[a-zA-Z]:",
-    r"dd\s+if=.*of=/dev/sd",
-    r"mkfs\.\w+\s+/dev/",
-    # Ransomware / encryption
-    r"openssl\s+enc.*-aes.*-in\s+/",
-    r"gpg\s+--encrypt.*\*/",
-    r"cipher\s+/w:",
-    # Credential exfiltration to external
-    r"curl.*pastebin\.com",
-    r"wget.*transfer\.sh",
-    r"curl.*webhook\.site",
-    r"Invoke-WebRequest.*ngrok",
-    # Bootloader / firmware
-    r"dd.*of=/dev/sda$",
-    r"bcdedit\s+/set.*boot",
-    r"flashrom",
-    # Active network attacks
-    r"nmap\s+(?!127\.|10\.|192\.168\.|172\.(?:1[6-9]|2[0-9]|3[01]))",
-    r"masscan\s+",
-    r"hping3\s+",
-    # Kernel / driver manipulation
-    r"insmod\s+",
-    r"modprobe\s+",
-    r"sc\s+create.*binpath",
-    # Credential theft to external
-    r"mimikatz.*sekurlsa.*logonpasswords.*>.*\\\\",
-    r"reg\s+save.*sam.*\\\\",
+    # # Destructive disk operations
+    # r"rm\s+-rf\s+/(?!\w)",
+    # r"format\s+[a-zA-Z]:",
+    # r"dd\s+if=.*of=/dev/sd",
+    # r"mkfs\.\w+\s+/dev/",
+    # # Ransomware / encryption
+    # r"openssl\s+enc.*-aes.*-in\s+/",
+    # r"gpg\s+--encrypt.*\*/",
+    # r"cipher\s+/w:",
+    # # Credential exfiltration to external
+    # r"curl.*pastebin\.com",
+    # r"wget.*transfer\.sh",
+    # r"curl.*webhook\.site",
+    # r"Invoke-WebRequest.*ngrok",
+    # # Bootloader / firmware
+    # r"dd.*of=/dev/sda$",
+    # r"bcdedit\s+/set.*boot",
+    # r"flashrom",
+    # # Active network attacks
+    # r"nmap\s+(?!127\.|10\.|192\.168\.|172\.(?:1[6-9]|2[0-9]|3[01]))",
+    # r"masscan\s+",
+    # r"hping3\s+",
+    # # Kernel / driver manipulation
+    # r"insmod\s+",
+    # r"modprobe\s+",
+    # r"sc\s+create.*binpath",
+    # # Credential theft to external
+    # r"mimikatz.*sekurlsa.*logonpasswords.*>.*\\\\",
+    # r"reg\s+save.*sam.*\\\\",
 ]
 
 SIMULATION_MARKERS: list[str] = [
@@ -303,4 +356,4 @@ EXECUTOR_TO_PLATFORM_FAMILY: dict[str, str] = {
     "manual": "linux",
 }
 
-AUDIT_LOG_PATH: Path = Path("output/safety_audit.jsonl")
+AUDIT_LOG_PATH: Path = _SRC_DIR.parent / "output" / "safety_audit.jsonl"

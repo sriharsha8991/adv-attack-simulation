@@ -35,7 +35,14 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from src.config import BLOCKLIST_VERSION, CATEGORY_TO_TACTICS, SYSTEM_PROMPT
+from src.config import (
+    AGENT_VERSION,
+    BLOCKLIST_VERSION,
+    CATEGORY_TO_TACTICS,
+    SCHEMA_VERSION,
+    SYSTEM_PROMPT,
+    get_settings,
+)
 from src.graph.connection import Neo4jConnection
 from src.layers.layer2_enrichment import GalaxyManager
 from src.layers.layer6_safety import SafetyValidator
@@ -99,6 +106,11 @@ class ReasoningEngine:
         if self._owns_conn:
             self._conn.close()
             logger.info("ReasoningEngine closed owned Neo4j connection.")
+
+    @property
+    def model_name(self) -> str:
+        """Return the LLM model identifier (for API responses)."""
+        return self._llm.model_name
 
     def __enter__(self) -> ReasoningEngine:
         return self
@@ -173,31 +185,40 @@ class ReasoningEngine:
         total_phase_b_tokens = 0
 
         for i in range(1, count + 1):
-            ability = self._phase_b_compose(
+            ability, phase_b_tokens = self._phase_b_compose(
                 reasoning_context=reasoning_context,
                 category=cat_value,
                 platform=plat_value,
                 ability_index=i,
                 total_count=count,
             )
+            total_phase_b_tokens += phase_b_tokens
             if ability is not None:
                 # Post-generation enforcement
                 ability = self._enforce_safety_fields(ability)
 
                 # Safety validation pipeline (18 rules)
-                validation = self._validator.validate(ability)
+                if get_settings().enable_safety_layer:
+                    validation = self._validator.validate(ability)
 
-                if not validation.passed:
-                    ability.approval_status = ApprovalStatus.BLOCKED
-                    logger.warning(
-                        "Ability %d/%d BLOCKED by safety rules: %s",
-                        i,
-                        count,
-                        [f.rule_name for f in validation.hard_failures],
+                    if not validation.passed:
+                        ability.approval_status = ApprovalStatus.BLOCKED
+                        logger.warning(
+                            "Ability %d/%d BLOCKED by safety rules: %s",
+                            i,
+                            count,
+                            [f.rule_name for f in validation.hard_failures],
+                        )
+
+                    # Collect soft warnings for human reviewers
+                    warning_msgs = [w.detail for w in validation.warnings]
+                else:
+                    logger.info(
+                        "Safety layer DISABLED — skipping validation for ability %d/%d",
+                        i, count,
                     )
-
-                # Collect soft warnings for human reviewers
-                warning_msgs = [w.detail for w in validation.warnings]
+                    validation = None
+                    warning_msgs = []
 
                 # Attach generation trace
                 ability.generation_trace = GenerationTrace(
@@ -300,14 +321,14 @@ class ReasoningEngine:
         platform: str,
         ability_index: int,
         total_count: int,
-    ) -> Ability | None:
+    ) -> tuple[Ability | None, int]:
         """Execute Phase B: generate a single structured Ability.
 
         Uses ``generate(schema=Ability)`` to produce
         a validated Pydantic instance.
 
         Returns:
-            Validated ``Ability`` or ``None`` if generation fails.
+            Tuple of (validated ``Ability`` or ``None``, token count).
         """
         composition_prompt = _build_composition_prompt(
             reasoning_context=reasoning_context,
@@ -324,7 +345,7 @@ class ReasoningEngine:
 
         try:
             result = self._llm.generate(messages, schema=Ability)
-            return result.parsed  # type: ignore[return-value]
+            return result.parsed, result.total_tokens  # type: ignore[return-value]
         except ValidationError as exc:
             logger.error(
                 "Phase B validation failed for ability %d/%d after retries: %s",
@@ -332,7 +353,7 @@ class ReasoningEngine:
                 total_count,
                 exc.error_count(),
             )
-            return None
+            return None, 0
         except Exception as exc:
             logger.error(
                 "Phase B composition failed for ability %d/%d: %s",
@@ -341,7 +362,7 @@ class ReasoningEngine:
                 exc,
                 exc_info=True,
             )
-            return None
+            return None, 0
 
     # ──────────────────────────────────────────────────────────
     # Post-generation enforcement
@@ -357,9 +378,9 @@ class ReasoningEngine:
         ability.approval_status = ApprovalStatus.PENDING
         ability.created_by = "AI"
         ability.simulation_only = True
-        ability.schema_version = "1.0"
+        ability.schema_version = SCHEMA_VERSION
         ability.generated_at = datetime.now(timezone.utc).isoformat()
-        ability.agent_version = "0.1.0"
+        ability.agent_version = AGENT_VERSION
         return ability
 
 

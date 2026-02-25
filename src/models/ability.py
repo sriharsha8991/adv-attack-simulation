@@ -9,8 +9,6 @@ These Pydantic models are used for:
 
 import uuid
 from datetime import datetime, timezone
-from typing import List, Optional
-
 from pydantic import BaseModel, Field
 
 from .enums import (
@@ -37,7 +35,7 @@ class MitreMapping(BaseModel):
             "Must exist as a Technique node in the knowledge graph."
         )
     )
-    sub_technique: Optional[str] = Field(
+    sub_technique: str | None = Field(
         default=None,
         description=(
             "ATT&CK sub-technique ID (e.g., 'T1003.001', 'T1059.001'). "
@@ -142,19 +140,19 @@ class CampaignUsage(BaseModel):
     campaign_name: str = Field(
         description="Name of the campaign/operation (e.g. 'SolarWinds Compromise').",
     )
-    first_seen: Optional[str] = Field(
+    first_seen: str | None = Field(
         default=None,
         description="ISO 8601 date when the campaign was first observed.",
     )
-    last_seen: Optional[str] = Field(
+    last_seen: str | None = Field(
         default=None,
         description="ISO 8601 date when the campaign was last observed.",
     )
-    attributed_groups: List[str] = Field(
+    attributed_groups: list[str] = Field(
         default_factory=list,
         description="APT groups attributed to this campaign.",
     )
-    description_snippet: Optional[str] = Field(
+    description_snippet: str | None = Field(
         default=None,
         description="Brief excerpt from the campaign description (max 300 chars).",
     )
@@ -183,21 +181,21 @@ class ThreatIntelContext(BaseModel):
     Sourced from Neo4j knowledge graph (IntrusionSets, Tools) and MISP galaxies.
     """
 
-    associated_groups: List[str] = Field(
+    associated_groups: list[str] = Field(
         default_factory=list,
         description=(
             "APT groups / intrusion sets known to use this technique. "
             "Sourced from MITRE ATT&CK IntrusionSet→USES→Technique relationships."
         ),
     )
-    associated_tools: List[str] = Field(
+    associated_tools: list[str] = Field(
         default_factory=list,
         description=(
             "Tools and malware associated with this technique. "
             "Sourced from MITRE ATT&CK Tool/Malware→USES→Technique relationships."
         ),
     )
-    recent_campaigns: List[CampaignUsage] = Field(
+    recent_campaigns: list[CampaignUsage] = Field(
         default_factory=list,
         description=(
             "Structured real-world campaigns that used this technique. "
@@ -205,7 +203,7 @@ class ThreatIntelContext(BaseModel):
             "and group attribution."
         ),
     )
-    detection_guidance: Optional[str] = Field(
+    detection_guidance: str | None = Field(
         default=None,
         description=(
             "How defenders can detect this technique. "
@@ -252,7 +250,7 @@ class GenerationTrace(BaseModel):
     """Audit trail of how the ability was generated."""
 
     model: str = Field(description="LLM model used for generation")
-    tools_called: List[str] = Field(
+    tools_called: list[str] = Field(
         default_factory=list,
         description="List of function tools invoked during generation",
     )
@@ -274,7 +272,7 @@ class GenerationTrace(BaseModel):
             "Required for safety audit trail."
         ),
     )
-    validation_warnings: List[str] = Field(
+    validation_warnings: list[str] = Field(
         default_factory=list,
         description=(
             "List of soft validation warnings (syntax check, unknown binary). "
@@ -329,7 +327,7 @@ class Ability(BaseModel):
     )
 
     # === Execution ===
-    executors: List[Executor] = Field(
+    executors: list[Executor] = Field(
         min_length=1,
         description=(
             "One or more execution methods. Each executor targets a specific "
@@ -370,7 +368,7 @@ class Ability(BaseModel):
         default="0.1.0",
         description="Version of the AI agent that generated this ability.",
     )
-    generation_trace: Optional[GenerationTrace] = Field(
+    generation_trace: GenerationTrace | None = Field(
         default=None,
         description="Audit trail of the generation process (model, tools called, tokens).",
     )

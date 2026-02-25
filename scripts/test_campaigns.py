@@ -1,55 +1,62 @@
 """Quick test: verify campaign enrichment pipeline end-to-end."""
 
+import logging
+
 from src.graph.connection import Neo4jConnection
 from src.tools.cti_tools import CTITools
 from src.tools.misp_tools import MISPTools
 
-conn = Neo4jConnection()
-cti = CTITools(conn)
+logger = logging.getLogger(__name__)
 
-# 1. Campaigns for T1003 (parent technique — campaigns usually link to sub-techniques)
-campaigns_t1003 = cti.get_campaigns_for_technique("T1003")
-print(f"Campaigns for T1003 (parent): {len(campaigns_t1003)}")
 
-# 2. Campaigns for T1003.001 (sub-technique — more likely to have direct links)
-campaigns_t1003_001 = cti.get_campaigns_for_technique("T1003.001")
-print(f"Campaigns for T1003.001: {len(campaigns_t1003_001)}")
-for c in campaigns_t1003_001[:5]:
-    print(f"  - {c['campaign_name']} ({c.get('first_seen','?')}) groups={c.get('attributed_groups',[])}")
+def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-# 3. Campaigns for T1059.001 (known high count)
-campaigns_t1059 = cti.get_campaigns_for_technique("T1059.001")
-print(f"\nCampaigns for T1059.001: {len(campaigns_t1059)}")
-for c in campaigns_t1059[:5]:
-    print(f"  - {c['campaign_name']} ({c.get('first_seen','?')}) groups={c.get('attributed_groups',[])}")
+    conn = Neo4jConnection()
+    cti = CTITools(conn)
 
-# 4. Campaigns for APT29
-group_campaigns = cti.get_campaigns_for_group("APT29")
-print(f"\nCampaigns for APT29: {len(group_campaigns)}")
-for c in group_campaigns:
-    print(f"  - {c['campaign_name']} ({c.get('first_seen','?')}) techs={len(c.get('techniques_used',[]))}")
+    campaigns_t1003 = cti.get_campaigns_for_technique("T1003")
+    logger.info("Campaigns for T1003 (parent): %d", len(campaigns_t1003))
 
-# 5. Check what T1003 sub-techniques have campaigns
-result = conn.run_query(
-    "MATCH (c:Campaign)-[:CAMPAIGN_USES]->(t) "
-    "WHERE t.attack_id STARTS WITH 'T1003' "
-    "RETURN t.attack_id AS aid, collect(DISTINCT c.name) AS campaigns"
-)
-print(f"\nT1003 family campaign coverage:")
-for r in result:
-    print(f"  {r['aid']}: {len(r['campaigns'])} campaigns")
+    campaigns_t1003_001 = cti.get_campaigns_for_technique("T1003.001")
+    logger.info("Campaigns for T1003.001: %d", len(campaigns_t1003_001))
+    for c in campaigns_t1003_001[:5]:
+        logger.info("  - %s (%s) groups=%s", c["campaign_name"], c.get("first_seen", "?"), c.get("attributed_groups", []))
 
-# 6. Full enrichment via MISPTools
-misp = MISPTools(conn)
-ctx = misp.enrich_technique_context("T1059.001")
-print(f"\nFull enrichment for T1059.001:")
-print(f"  Groups: {len(ctx.associated_groups)}")
-print(f"  Tools: {len(ctx.associated_tools)}")
-print(f"  Campaigns: {len(ctx.recent_campaigns)}")
-if ctx.recent_campaigns:
-    for c in ctx.recent_campaigns[:3]:
-        print(f"    - {c.campaign_name} ({c.first_seen}-{c.last_seen}) attr={c.attributed_groups}")
-print(f"  Detection guidance: {ctx.detection_guidance[:80]}...")
+    campaigns_t1059 = cti.get_campaigns_for_technique("T1059.001")
+    logger.info("Campaigns for T1059.001: %d", len(campaigns_t1059))
+    for c in campaigns_t1059[:5]:
+        logger.info("  - %s (%s) groups=%s", c["campaign_name"], c.get("first_seen", "?"), c.get("attributed_groups", []))
 
-conn.close()
-print("\n✓ All campaign enrichment tests passed!")
+    group_campaigns = cti.get_campaigns_for_group("APT29")
+    logger.info("Campaigns for APT29: %d", len(group_campaigns))
+    for c in group_campaigns:
+        logger.info("  - %s (%s) techs=%d", c["campaign_name"], c.get("first_seen", "?"), len(c.get("techniques_used", [])))
+
+    result = conn.run_query(
+        "MATCH (c:Campaign)-[:CAMPAIGN_USES]->(t) "
+        "WHERE t.attack_id STARTS WITH 'T1003' "
+        "RETURN t.attack_id AS aid, collect(DISTINCT c.name) AS campaigns"
+    )
+    logger.info("T1003 family campaign coverage:")
+    for r in result:
+        logger.info("  %s: %d campaigns", r["aid"], len(r["campaigns"]))
+
+    misp = MISPTools(conn)
+    ctx = misp.enrich_technique_context("T1059.001")
+    logger.info("Full enrichment for T1059.001:")
+    logger.info("  Groups: %d", len(ctx.associated_groups))
+    logger.info("  Tools: %d", len(ctx.associated_tools))
+    logger.info("  Campaigns: %d", len(ctx.recent_campaigns))
+    if ctx.recent_campaigns:
+        for c in ctx.recent_campaigns[:3]:
+            logger.info("    - %s (%s-%s) attr=%s", c.campaign_name, c.first_seen, c.last_seen, c.attributed_groups)
+    if ctx.detection_guidance:
+        logger.info("  Detection guidance: %s...", ctx.detection_guidance[:80])
+
+    conn.close()
+    logger.info("All campaign enrichment tests passed!")
+
+
+if __name__ == "__main__":
+    main()

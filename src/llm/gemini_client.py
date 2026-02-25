@@ -25,12 +25,10 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel, ValidationError
 
+from src.config import MAX_VALIDATION_RETRIES
 from src.llm.base import LLMClient, GenerateResult
 
 logger = logging.getLogger(__name__)
-
-# Maximum structured-output validation retries
-_MAX_VALIDATION_RETRIES = 3
 
 
 class GeminiClient(LLMClient):
@@ -174,17 +172,17 @@ class GeminiClient(LLMClient):
         Appends validation errors to the conversation so the model can
         self-correct.
         """
-        for attempt in range(1, _MAX_VALIDATION_RETRIES + 1):
+        for attempt in range(1, MAX_VALIDATION_RETRIES + 1):
             try:
                 return schema.model_validate_json(raw_text)
             except ValidationError as exc:
                 logger.warning(
                     "Validation failed (attempt %d/%d): %s",
                     attempt,
-                    _MAX_VALIDATION_RETRIES,
+                    MAX_VALIDATION_RETRIES,
                     exc.error_count(),
                 )
-                if attempt == _MAX_VALIDATION_RETRIES:
+                if attempt == MAX_VALIDATION_RETRIES:
                     raise
 
                 # Append error context for self-correction

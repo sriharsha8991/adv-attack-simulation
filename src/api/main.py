@@ -20,7 +20,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from src.config import get_settings
+from src.config import AGENT_VERSION, get_settings
 from src.graph.connection import Neo4jConnection
 from src.layers.layer2_enrichment import GalaxyManager
 from src.layers.layer3_reasoning import ReasoningEngine
@@ -137,7 +137,7 @@ app = FastAPI(
         "Adversary simulation ability compiler — generates MITRE ATT&CK-mapped "
         "abilities via a two-phase LLM reasoning pipeline."
     ),
-    version="0.1.0",
+    version=AGENT_VERSION,
     lifespan=lifespan,
 )
 
@@ -193,7 +193,7 @@ async def generate_abilities(req: GenerateRequest):
         abilities=[a.model_dump(mode="json") for a in abilities],
         count=len(abilities),
         elapsed_seconds=elapsed,
-        model=_engine._llm.model_name,
+        model=_engine.model_name,
         validation_summary={
             "total": len(abilities),
             "passed": passed_count,
@@ -210,9 +210,10 @@ async def generate_abilities(req: GenerateRequest):
 if __name__ == "__main__":
     import uvicorn
 
+    _settings = get_settings()
     uvicorn.run(
         "src.api.main:app",
-        host="0.0.0.0",
-        port=8000,
+        host=_settings.api_host,
+        port=_settings.api_port,
         reload=True,
     )

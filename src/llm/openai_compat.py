@@ -24,12 +24,10 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
+from src.config import MAX_VALIDATION_RETRIES
 from src.llm.base import GenerateResult, LLMClient
 
 logger = logging.getLogger(__name__)
-
-# Maximum structured-output validation retries
-_MAX_VALIDATION_RETRIES = 3
 
 
 class OpenAICompatClient(LLMClient):
@@ -270,7 +268,7 @@ class OpenAICompatClient(LLMClient):
         last_error: ValidationError | None = None
         total_tokens = 0
 
-        for attempt in range(1, _MAX_VALIDATION_RETRIES + 1):
+        for attempt in range(1, MAX_VALIDATION_RETRIES + 1):
             def _call() -> Any:
                 return self._client.chat.completions.create(
                     model=self._model,
@@ -290,7 +288,7 @@ class OpenAICompatClient(LLMClient):
                 logger.info(
                     "Structured output validated (attempt %d/%d)",
                     attempt,
-                    _MAX_VALIDATION_RETRIES,
+                    MAX_VALIDATION_RETRIES,
                 )
                 return GenerateResult(
                     text=raw_text,
@@ -303,7 +301,7 @@ class OpenAICompatClient(LLMClient):
                 logger.warning(
                     "Validation failed (attempt %d/%d): %s errors",
                     attempt,
-                    _MAX_VALIDATION_RETRIES,
+                    MAX_VALIDATION_RETRIES,
                     exc.error_count(),
                 )
                 working_messages.append({"role": "assistant", "content": raw_text})

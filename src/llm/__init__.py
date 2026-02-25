@@ -35,7 +35,7 @@ def create_llm_client(settings: Settings) -> LLMClient:
             from src.llm.openai_compat import OpenAICompatClient
             return OpenAICompatClient(
                 api_key=settings.groq_api_key,
-                base_url="https://api.groq.com/openai/v1",
+                base_url=settings.groq_base_url,
                 model=settings.groq_model,
             )
         case "ollama":

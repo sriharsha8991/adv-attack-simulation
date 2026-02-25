@@ -43,8 +43,8 @@ from src.graph.queries import (
     SAMPLE_CREDENTIAL_ACCESS,
 )
 from src.graph.schema import clear_graph, setup_schema
+from src.config import DEFAULT_STIX_CACHE_PATH
 from src.layers.layer1_ingestion import (
-    DEFAULT_CACHE_PATH,
     download_stix_bundle,
     load_stix_store,
     parse_campaigns,
@@ -156,7 +156,7 @@ def main(
         elif source == "github":
             stix_path = download_stix_bundle()
         else:
-            stix_path = DEFAULT_CACHE_PATH
+            stix_path = DEFAULT_STIX_CACHE_PATH
             if not stix_path.exists():
                 console.print(
                     f"[red]Cached file not found at {stix_path}. "

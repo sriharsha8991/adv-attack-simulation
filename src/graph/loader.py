@@ -15,14 +15,16 @@ Usage:
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
+from src.config import GRAPH_BATCH_SIZE
 from src.graph.connection import Neo4jConnection
 
 logger = logging.getLogger(__name__)
 
 # Default batch size for UNWIND operations — keeps under Aura transaction limits
-BATCH_SIZE = 500
+BATCH_SIZE = GRAPH_BATCH_SIZE
 
 
 # ──────────────────────────────────────────────────────────────
@@ -90,8 +92,6 @@ MERGE (d:DataSource {stix_id: item.stix_id})
 SET d.name = item.name,
     d.description = item.description
 """
-#Mitigation is a defensive control category. they are like preventive measures but they are designed to detect and respond to attacks that have already occurred. They can include things like intrusion detection systems, security information and event management (SIEM) systems, and incident response teams. 
-# #Detective controls are important for identifying and mitigating attacks that have bypassed preventive controls, and for minimizing the damage caused by successful attacks.
 LOAD_MITIGATIONS = """
 UNWIND $items AS item
 MERGE (mt:Mitigation {stix_id: item.stix_id})
@@ -313,18 +313,18 @@ def load_all_nodes(
     conn: Neo4jConnection,
     parsed: dict[str, list[dict]],
 ) -> dict[str, int]:
-    """Load all 8 node types from parsed STIX data.
+    """Load all 9 node types from parsed STIX data in parallel.
+
+    Each node type uses MERGE on independent labels, so they can be
+    loaded concurrently without conflicts.
 
     Args:
         conn: Neo4j connection.
-        parsed: Dict with keys matching node type names, values are lists of dicts.
-            Expected keys: tactics, techniques, subtechniques, intrusion_sets,
-            tools, malware, data_sources, mitigations
+        parsed: Dict with keys matching node type names.
 
     Returns:
         Dict mapping node type → count loaded.
     """
-    stats = {}
     loaders = [
         ("tactics", load_tactics),
         ("techniques", load_techniques),
@@ -336,9 +336,16 @@ def load_all_nodes(
         ("mitigations", load_mitigations),
         ("campaigns", load_campaigns),
     ]
-    for key, loader_fn in loaders:
-        items = parsed.get(key, [])
-        stats[key] = loader_fn(conn, items)
+
+    stats: dict[str, int] = {}
+    with ThreadPoolExecutor(max_workers=len(loaders)) as pool:
+        futures = {
+            pool.submit(loader_fn, conn, parsed.get(key, [])): key
+            for key, loader_fn in loaders
+        }
+        for future in as_completed(futures):
+            key = futures[future]
+            stats[key] = future.result()
     return stats
 
 

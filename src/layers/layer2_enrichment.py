@@ -16,12 +16,18 @@ from __future__ import annotations
 
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
 import httpx
 
-from src.config import DEFAULT_GALAXY_CACHE_DIR, GALAXY_BASE_URL, GALAXY_FILES
+from src.config import (
+    DEFAULT_GALAXY_CACHE_DIR,
+    GALAXY_BASE_URL,
+    GALAXY_DOWNLOAD_TIMEOUT,
+    GALAXY_FILES,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +50,7 @@ class GalaxyManager:
 
         # Lookup indexes: technique_id → list of related items
         self._attack_patterns: dict[str, dict[str, Any]] = {}
+        self._uuid_to_tid: dict[str, str] = {}  # UUID → technique_id reverse index
         self._intrusion_sets: dict[str, list[dict[str, Any]]] = {}
         self._tools: dict[str, list[dict[str, Any]]] = {}
         self._malware: dict[str, list[dict[str, Any]]] = {}
@@ -71,7 +78,7 @@ class GalaxyManager:
         url = f"{GALAXY_BASE_URL}/{filename}"
         logger.info("Downloading %s ...", url)
 
-        with httpx.Client(timeout=60.0, follow_redirects=True) as client:
+        with httpx.Client(timeout=GALAXY_DOWNLOAD_TIMEOUT, follow_redirects=True) as client:
             resp = client.get(url)
             resp.raise_for_status()
             local_path.write_bytes(resp.content)
@@ -81,14 +88,20 @@ class GalaxyManager:
         return local_path
 
     def download_all(self, force: bool = False) -> dict[str, Path]:
-        """Download all required galaxy files.
+        """Download all required galaxy files in parallel.
 
         Returns:
             Dict mapping galaxy_key → local Path.
         """
         paths: dict[str, Path] = {}
-        for key in GALAXY_FILES:
-            paths[key] = self.download_file(key, force=force)
+        with ThreadPoolExecutor(max_workers=len(GALAXY_FILES)) as pool:
+            futures = {
+                pool.submit(self.download_file, key, force): key
+                for key in GALAXY_FILES
+            }
+            for future in as_completed(futures):
+                key = futures[future]
+                paths[key] = future.result()
         logger.info("All %d galaxy files ready.", len(paths))
         return paths
 
@@ -146,6 +159,12 @@ class GalaxyManager:
                 }
                 count += 1
         logger.info("Indexed %d attack pattern entries.", count)
+
+        # Build UUID → technique_id reverse index for O(1) lookups
+        self._uuid_to_tid = {
+            ap["uuid"]: tid for tid, ap in self._attack_patterns.items() if ap.get("uuid")
+        }
+        logger.info("Built UUID reverse index: %d entries.", len(self._uuid_to_tid))
         return count
 
     def _parse_intrusion_sets(self, path: Path) -> int:
@@ -170,12 +189,10 @@ class GalaxyManager:
                 dest_uuid = rel.get("dest-uuid", "")
                 rel_type = rel.get("type", "")
                 if rel_type == "uses" and dest_uuid:
-                    # Look up the technique ID from attack_patterns by UUID
-                    for tid, ap in self._attack_patterns.items():
-                        if ap.get("uuid") == dest_uuid:
-                            self._intrusion_sets.setdefault(tid, []).append(group_info)
-                            count += 1
-                            break
+                    tid = self._uuid_to_tid.get(dest_uuid)
+                    if tid:
+                        self._intrusion_sets.setdefault(tid, []).append(group_info)
+                        count += 1
         logger.info("Indexed %d intrusion-set→technique links.", count)
         return count
 
@@ -193,11 +210,10 @@ class GalaxyManager:
                 dest_uuid = rel.get("dest-uuid", "")
                 rel_type = rel.get("type", "")
                 if rel_type == "uses" and dest_uuid:
-                    for tid, ap in self._attack_patterns.items():
-                        if ap.get("uuid") == dest_uuid:
-                            self._tools.setdefault(tid, []).append(tool_info)
-                            count += 1
-                            break
+                    tid = self._uuid_to_tid.get(dest_uuid)
+                    if tid:
+                        self._tools.setdefault(tid, []).append(tool_info)
+                        count += 1
         logger.info("Indexed %d tool→technique links.", count)
         return count
 
@@ -215,11 +231,10 @@ class GalaxyManager:
                 dest_uuid = rel.get("dest-uuid", "")
                 rel_type = rel.get("type", "")
                 if rel_type == "uses" and dest_uuid:
-                    for tid, ap in self._attack_patterns.items():
-                        if ap.get("uuid") == dest_uuid:
-                            self._malware.setdefault(tid, []).append(mal_info)
-                            count += 1
-                            break
+                    tid = self._uuid_to_tid.get(dest_uuid)
+                    if tid:
+                        self._malware.setdefault(tid, []).append(mal_info)
+                        count += 1
         logger.info("Indexed %d malware→technique links.", count)
         return count
 

@@ -19,17 +19,16 @@ Usage:
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
+from src.config import MAX_DETECTION_TEXT_LEN, MAX_SNIPPET_LEN
 from src.graph.connection import Neo4jConnection
 from src.layers.layer2_enrichment import GalaxyManager
 from src.models.ability import CampaignUsage, ThreatIntelContext
 from src.tools.cti_tools import CTITools
 
 logger = logging.getLogger(__name__)
-
-# Maximum description snippet length for campaign entries
-_MAX_SNIPPET_LEN = 300
 
 
 class MISPTools:
@@ -122,8 +121,15 @@ class MISPTools:
         Returns:
             Fully populated ThreatIntelContext with structured campaigns.
         """
-        # --- Neo4j data ---
-        neo4j_ctx = self._cti.get_full_technique_context(technique_id)
+        # --- Parallel queries: Neo4j context + campaigns + MISP galaxy ---
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            f_neo4j = pool.submit(self._cti.get_full_technique_context, technique_id)
+            f_campaigns = pool.submit(self._cti.get_campaigns_for_technique, technique_id)
+            f_galaxy = pool.submit(self.search_misp_galaxy, technique_id)
+
+            neo4j_ctx = f_neo4j.result()
+            campaign_records = f_campaigns.result()
+            galaxy_ctx = f_galaxy.result()
 
         neo4j_groups: list[str] = neo4j_ctx.get("groups", [])
         neo4j_tools: list[str] = neo4j_ctx.get("tools", [])
@@ -131,12 +137,8 @@ class MISPTools:
         data_sources: list[str] = neo4j_ctx.get("data_sources", [])
         mitigations: list[str] = neo4j_ctx.get("mitigations", [])
 
-        # --- Campaign data from Neo4j (real STIX campaigns) ---
-        campaign_records = self._cti.get_campaigns_for_technique(technique_id)
+        # --- Build campaign objects ---
         campaigns = _build_campaign_objects(campaign_records)
-
-        # --- MISP Galaxy data ---
-        galaxy_ctx = self.search_misp_galaxy(technique_id)
 
         galaxy_groups = [
             g.get("name", "") for g in galaxy_ctx.get("groups", [])
@@ -214,8 +216,8 @@ def _build_campaign_objects(
         desc = rec.get("description") or ""
         snippet: str | None = None
         if desc:
-            snippet = desc[:_MAX_SNIPPET_LEN].rstrip()
-            if len(desc) > _MAX_SNIPPET_LEN:
+            snippet = desc[:MAX_SNIPPET_LEN].rstrip()
+            if len(desc) > MAX_SNIPPET_LEN:
                 snippet += "..."
 
         first_seen = rec.get("first_seen")
@@ -244,8 +246,8 @@ def _build_detection_guidance(
 
     if detection_text:
         # Truncate extremely long detection text
-        text = detection_text[:1000].rstrip()
-        if len(detection_text) > 1000:
+        text = detection_text[:MAX_DETECTION_TEXT_LEN].rstrip()
+        if len(detection_text) > MAX_DETECTION_TEXT_LEN:
             text += "..."
         parts.append(text)
 

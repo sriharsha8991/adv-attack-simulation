@@ -22,10 +22,14 @@ from pathlib import Path
 from typing import Any
 
 import requests
-from stix2 import MemoryStore
+from requests.adapters import HTTPAdapter
+from stix2 import MemoryStore, Filter
+from urllib3.util.retry import Retry
 
 from src.config import (
     DEFAULT_STIX_CACHE_PATH,
+    DOWNLOAD_CHUNK_SIZE,
+    STIX_DOWNLOAD_TIMEOUT,
     STIX_FILTERS,
     STIX_GITHUB_URL,
 )
@@ -61,12 +65,18 @@ def download_stix_bundle(
     logger.info("Downloading STIX bundle from %s ...", url)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
 
-    response = requests.get(url, timeout=120, stream=True)
+    # Retry transient failures (429, 500, 502, 503, 504) with backoff
+    session = requests.Session()
+    retries = Retry(total=3, backoff_factor=1.0, status_forcelist=[429, 500, 502, 503, 504])
+    session.mount("https://", HTTPAdapter(max_retries=retries))
+    session.mount("http://", HTTPAdapter(max_retries=retries))
+
+    response = session.get(url, timeout=STIX_DOWNLOAD_TIMEOUT, stream=True)
     response.raise_for_status()
 
     total_bytes = 0
     with open(cache_path, "wb") as f:
-        for chunk in response.iter_content(chunk_size=8192):
+        for chunk in response.iter_content(chunk_size=DOWNLOAD_CHUNK_SIZE):
             f.write(chunk)
             total_bytes += len(chunk)
 

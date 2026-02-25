@@ -15,6 +15,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from src.graph.connection import Neo4jConnection
@@ -339,11 +340,17 @@ class CTITools:
             logger.warning("Technique %s not found in graph.", technique_id)
             return {"error": f"Technique {technique_id} not found in knowledge graph"}
 
-        # 2. Detailed records (richer than the summary names above)
-        groups = self.get_intrusion_sets_for_technique(technique_id)
-        tools = self.get_tools_for_technique(technique_id)
-        mitigations = self.get_mitigations(technique_id)
-        campaigns = self.get_campaigns_for_technique(technique_id)
+        # 2. Detailed records in parallel (richer than the summary names above)
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            f_groups = pool.submit(self.get_intrusion_sets_for_technique, technique_id)
+            f_tools = pool.submit(self.get_tools_for_technique, technique_id)
+            f_mitigations = pool.submit(self.get_mitigations, technique_id)
+            f_campaigns = pool.submit(self.get_campaigns_for_technique, technique_id)
+
+            groups = f_groups.result()
+            tools = f_tools.result()
+            mitigations = f_mitigations.result()
+            campaigns = f_campaigns.result()
 
         result = {
             # Technique metadata

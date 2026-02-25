@@ -20,15 +20,22 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from src.config import (
+    LLM_BACKOFF_FACTOR,
+    LLM_BASE_DELAY,
+    LLM_MAX_DELAY,
+    LLM_MAX_RETRIES,
+)
+
 logger = logging.getLogger(__name__)
 
 # ──────────────────────────────────────────────────────────────
-# Retry configuration
+# Retry configuration (from config)
 # ──────────────────────────────────────────────────────────────
-MAX_RETRIES: int = 3
-BASE_DELAY: float = 1.0      # seconds
-MAX_DELAY: float = 30.0      # seconds
-BACKOFF_FACTOR: float = 2.0
+MAX_RETRIES = LLM_MAX_RETRIES
+BASE_DELAY = LLM_BASE_DELAY
+MAX_DELAY = LLM_MAX_DELAY
+BACKOFF_FACTOR = LLM_BACKOFF_FACTOR
 
 
 # ──────────────────────────────────────────────────────────────

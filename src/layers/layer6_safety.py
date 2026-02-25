@@ -24,7 +24,7 @@ import logging
 import re
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from src.config import (
@@ -33,11 +33,13 @@ from src.config import (
     COMMAND_BLOCKLIST,
     EXECUTOR_TO_PLATFORM_FAMILY,
     KNOWN_BINARIES,
+    MIN_ABILITY_DESC_LEN,
+    MIN_ABILITY_NAME_LEN,
     PLATFORM_COHERENCE_RULES,
     SIMULATION_MARKERS,
 )
 from src.models.ability import Ability
-from src.models.enums import ApprovalStatus, ExecutorType, Platform
+from src.models.enums import ApprovalStatus, ExecutorType
 
 logger = logging.getLogger(__name__)
 
@@ -133,20 +135,24 @@ class SafetyValidator:
         """
         hard_failures: list[RuleResult] = []
         warnings: list[RuleResult] = []
+        all_results: list[RuleResult] = []
 
         # Hard rules
         for rule_fn in self._hard_rules:
             result = rule_fn(ability)
-            self._log_audit(ability.id, result)
+            all_results.append(result)
             if not result.passed:
                 hard_failures.append(result)
 
         # Soft rules
         for rule_fn in self._soft_rules:
             result = rule_fn(ability)
-            self._log_audit(ability.id, result)
+            all_results.append(result)
             if not result.passed:
                 warnings.append(result)
+
+        # Batch audit write (single file open for all rules)
+        self._log_audit_batch(ability.id, all_results)
 
         passed = len(hard_failures) == 0
         status = "PENDING" if passed else "BLOCKED"
@@ -220,9 +226,9 @@ class SafetyValidator:
 
         technique_id = ability.mitre_mapping.technique
         try:
-            records, _, _ = self._conn.driver.execute_query(
-                "MATCH (t:Technique {technique_id: $tid}) RETURN t.technique_id AS tid",
-                tid=technique_id,
+            records = self._conn.run_query(
+                "MATCH (t {attack_id: $tid}) WHERE t:Technique OR t:SubTechnique RETURN t.attack_id AS tid",
+                {"tid": technique_id},
             )
             if not records:
                 return RuleResult(
@@ -337,17 +343,17 @@ class SafetyValidator:
     @staticmethod
     def _check_content(ability: Ability) -> RuleResult:
         """Rules 11 & 12: Name >= 5 chars, description >= 50 chars."""
-        if len(ability.name) < 5:
+        if len(ability.name) < MIN_ABILITY_NAME_LEN:
             return RuleResult(
                 rule_name="content_check",
                 passed=False,
-                detail=f"Name too short ({len(ability.name)} chars, need >= 5)",
+                detail=f"Name too short ({len(ability.name)} chars, need >= {MIN_ABILITY_NAME_LEN})",
             )
-        if len(ability.description) < 50:
+        if len(ability.description) < MIN_ABILITY_DESC_LEN:
             return RuleResult(
                 rule_name="content_check",
                 passed=False,
-                detail=f"Description too short ({len(ability.description)} chars, need >= 50)",
+                detail=f"Description too short ({len(ability.description)} chars, need >= {MIN_ABILITY_DESC_LEN})",
             )
         return RuleResult(rule_name="content_check", passed=True)
 
@@ -462,19 +468,23 @@ class SafetyValidator:
     # ── Audit logging ─────────────────────────────────────────
 
     @staticmethod
-    def _log_audit(ability_id: str, result: RuleResult) -> None:
-        """Append a single rule result to the JSONL audit log."""
+    def _log_audit_batch(ability_id: str, results: list[RuleResult]) -> None:
+        """Write all rule results for an ability in a single file operation."""
         try:
             AUDIT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-            entry = {
-                "timestamp": datetime.utcnow().isoformat() + "Z",
-                "ability_id": ability_id,
-                "rule": result.rule_name,
-                "result": "PASS" if result.passed else "FAIL",
-            }
-            if result.detail:
-                entry["detail"] = result.detail
+            ts = datetime.now(timezone.utc).isoformat()
+            lines: list[str] = []
+            for result in results:
+                entry: dict[str, str] = {
+                    "timestamp": ts,
+                    "ability_id": ability_id,
+                    "rule": result.rule_name,
+                    "result": "PASS" if result.passed else "FAIL",
+                }
+                if result.detail:
+                    entry["detail"] = result.detail
+                lines.append(json.dumps(entry))
             with AUDIT_LOG_PATH.open("a", encoding="utf-8") as fh:
-                fh.write(json.dumps(entry) + "\n")
+                fh.write("\n".join(lines) + "\n")
         except Exception as exc:
             logger.warning("Audit log write failed: %s", exc)
