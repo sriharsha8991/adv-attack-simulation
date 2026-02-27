@@ -188,6 +188,29 @@ CATEGORY_TO_TACTICS: dict[str, list[str]] = {
     "network_signaling":          ["command-and-control"],
 }
 
+# ══════════════════════════════════════════════════════════════
+# Batch Generation — Smart Matrix & Concurrency
+# ══════════════════════════════════════════════════════════════
+
+GENERATION_MATRIX: dict[str, list[str]] = {
+    "credential_access":          ["windows", "linux", "macos"],
+    "privilege_escalation":       ["windows", "linux", "macos"],
+    "persistence":                ["windows", "linux", "macos"],
+    "lateral_movement":           ["windows", "linux"],
+    "defense_evasion":            ["windows", "linux", "macos"],
+    "command_and_control":        ["windows", "linux", "macos"],
+    "discovery":                  ["windows", "linux", "macos", "cloud_aws", "cloud_azure", "cloud_gcp"],
+    "collection":                 ["windows", "linux", "macos"],
+    "exfiltration":               ["windows", "linux"],
+    "cloud_iam_abuse":            ["cloud_aws", "cloud_azure", "cloud_gcp"],
+    "active_directory_abuse":     ["windows"],
+    "web_application_simulation": ["linux", "windows"],
+    "network_signaling":          ["windows", "linux"],
+}
+
+BATCH_CONCURRENCY: int = 100       # max parallel LLM calls (Gemini tier-3)
+BATCH_OUTPUT_DIR: Path = _SRC_DIR.parent / "output" / "abilities"
+
 SYSTEM_PROMPT: str = """\
 You are an adversary simulation specialist for defensive security testing.
 Your role is to generate MITRE ATT&CK-mapped attack abilities that help security teams
